@@ -1,0 +1,28 @@
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# Node
+node_modules/
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# Secrets/keys
+*.pem
+*.key
+*.crt
+*.env
+secrets/
