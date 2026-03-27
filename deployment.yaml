@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mydeploy
+  labels:
+    app: myapp
+    environment: production
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: myapp           
+  template:
+    metadata:
+      labels:
+        app: myapp       
+        version: latest
+    spec:
+      containers:
+      - name: mycontainer
+        image: quackpoker/awsops-app:latest
+        ports:
+        - containerPort: 8080
+          name: http
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 20
+          periodSeconds: 5

@@ -1,0 +1,152 @@
+// JENKINS CI PIPELINE
+// Purpose: Build code into JAR, scan with Trivy, push to Dockerhub
+
+pipeline {
+    agent any
+    
+    environment {
+        DOCKER_CREDS = credentials('my dockerhub creds')
+        JOB_NAME_LOWER = "awsops-app"
+    }
+    
+    tools {
+        maven 'maven-3.9.6'  // Configure Maven tool in Jenkins
+        jdk 'openjdk-17'      // Configure JDK tool in Jenkins
+    }
+    
+    stages {
+        stage('1. Cleanup') {
+            steps {
+                cleanWs()
+            }
+        }
+        
+        stage('2. Git Checkout') {
+            steps {
+                git branch: 'develop', 
+                    url: 'https://github.com/mykelayo/AWS-DevOps-CI-CD-Project.git'
+            }
+        }
+        
+        stage('3. Maven Unit Test') {
+            steps {
+                sh 'mvn clean test'
+            }
+        }
+        
+        stage('4. Maven Build') {
+            steps {
+                sh 'mvn package -DskipTests'
+            }
+        }
+        
+        stage('5. Maven Integration Test') {
+            steps {
+                sh 'mvn verify'
+            }
+        }
+        
+        stage('6. Docker Image Build') {
+            steps {
+                script {
+                    sh """
+                        docker build -t ${JOB_NAME_LOWER}:${BUILD_NUMBER} .
+                        docker tag ${JOB_NAME_LOWER}:${BUILD_NUMBER} ${JOB_NAME_LOWER}:latest
+                    """
+                }
+            }
+        }
+        
+        stage('7. Docker Image Tag for Docker Hub') {
+            steps {
+                script {
+                    sh """
+                        docker tag ${JOB_NAME_LOWER}:${BUILD_NUMBER} ${DOCKER_CREDS_USR}/${JOB_NAME_LOWER}:${BUILD_NUMBER}
+                        docker tag ${JOB_NAME_LOWER}:${BUILD_NUMBER} ${DOCKER_CREDS_USR}/${JOB_NAME_LOWER}:latest
+                    """
+                }
+            }
+        }
+        
+        stage('8. Trivy Image Scan') {
+            steps {
+                script {
+                    sh """
+                        trivy image --severity HIGH,CRITICAL \
+                        --exit-code 0 \
+                        --ignore-unfixed \
+                        ${DOCKER_CREDS_USR}/${JOB_NAME_LOWER}:${BUILD_NUMBER} > trivy-scan.txt || true
+                    """
+                    
+                    // Archive scan results
+                    archiveArtifacts artifacts: 'trivy-scan.txt', fingerprint: true
+                    
+                    // Check for critical vulnerabilities
+                    def scanResult = readFile('trivy-scan.txt')
+                    if (scanResult.contains('CRITICAL')) {
+                        error("Critical vulnerabilities found! Check trivy-scan.txt")
+                    }
+                }
+            }
+        }
+        
+        stage('9. Docker Image Push') {
+            steps {
+                script {
+                    sh """
+                        echo "${DOCKER_CREDS_PSW}" | docker login -u "${DOCKER_CREDS_USR}" --password-stdin
+                        docker push ${DOCKER_CREDS_USR}/${JOB_NAME_LOWER}:${BUILD_NUMBER}
+                        docker push ${DOCKER_CREDS_USR}/${JOB_NAME_LOWER}:latest
+                    """
+                }
+            }
+        }
+        
+        stage('10. Docker Image Cleanup') {
+            steps {
+                script {
+                    sh """
+                        docker image prune -af
+                        docker system prune -f
+                    """
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            // Clean up workspace
+            cleanWs()
+        }
+        
+        success {
+            echo "Pipeline completed successfully!"
+            // Send email notification
+            emailext(
+                subject: "SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+                body: "The build completed successfully. Image: ${DOCKER_CREDS_USR}/${JOB_NAME_LOWER}:${BUILD_NUMBER}",
+                to: 'michaelayo360@gmail.com'
+            )
+        }
+        
+        failure {
+            echo "Pipeline failed!"
+            // Send failure notification
+            emailext(
+                subject: "FAILED: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+                body: "The build failed. Check console output for details.",
+                to: 'michaelayo360@gmail.com'
+            )
+        }
+        
+        aborted {
+            echo "Pipeline aborted!"
+        }
+        
+        cleanup {
+            // Always clean up Docker images
+            sh 'docker image prune -f'
+        }
+    }
+}

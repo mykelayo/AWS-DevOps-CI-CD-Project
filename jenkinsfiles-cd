@@ -1,0 +1,135 @@
+// JENKINS CD PIPELINE
+// Here the image stored in Dockerhub will be deployed using K8s
+
+pipeline {
+    agent any
+    
+    environment {
+        NODE_IP = "172.31.76.137"                   // K8s node private IP from Terraform output
+        EC2_NAME = "ec2-user"                       // AWS EC2 username
+        PIPELINE_NAME = "ci-pipeline"               // Your CI pipeline name
+        PROJECT_NAME = "AWS-DevOps-CI-CD-Project"   // Your project source directory (where manifests are)
+        K8S_NAMESPACE = "awsops-cd"                 // Kubernetes namespace
+    }
+    
+    stages {
+        stage("1. Copy K8s Manifests") {
+            steps {
+                sshagent(['awsops']) {
+                    // Copy deployment and service YAML files to Kubernetes node
+                    sh """
+                        scp -o StrictHostKeyChecking=no \
+                            /var/lib/jenkins/workspace/${PIPELINE_NAME}/${PROJECT_NAME}/deployment.yaml \
+                            ${EC2_NAME}@${NODE_IP}:/home/${EC2_NAME}/deployment.yaml
+                    """
+                    sh """
+                        scp -o StrictHostKeyChecking=no \
+                            /var/lib/jenkins/workspace/${PIPELINE_NAME}/${PROJECT_NAME}/service.yaml \
+                            ${EC2_NAME}@${NODE_IP}:/home/${EC2_NAME}/service.yaml
+                    """
+                }
+            }
+        }
+        
+        stage('2. Manual Approval') {
+            steps {
+                input message: 'Approve deployment to Kubernetes?', ok: 'Deploy!'
+            }
+        }
+        
+        stage('3. Deploy to Kubernetes') {
+            steps {
+                sshagent(['awsops']) {
+                    sh """
+                        ssh -o StrictHostKeyChecking=no ${EC2_NAME}@${NODE_IP} << 'EOF'
+                            # Apply Kubernetes manifests
+                            kubectl apply -f /home/${EC2_NAME}/deployment.yaml
+                            kubectl apply -f /home/${EC2_NAME}/service.yaml
+                            
+                            # Wait for rollout to complete
+                            kubectl rollout status deployment/mydeploy --timeout=300s
+                            
+                            # Restart deployment (optional - to pull latest image)
+                            kubectl rollout restart deployment/mydeploy
+                            kubectl rollout status deployment/mydeploy --timeout=300s
+                            
+                            # Show deployment status
+                            echo "========================================="
+                            echo "Deployment Status:"
+                            kubectl get deployments
+                            echo ""
+                            echo "Pods Status:"
+                            kubectl get pods
+                            echo ""
+                            echo "Services:"
+                            kubectl get services
+                            echo "========================================="
+EOF
+                    """
+                }
+            }
+        }
+        
+        stage('4. Verify Deployment') {
+            steps {
+                sshagent(['awsops']) {
+                    sh """
+                        ssh -o StrictHostKeyChecking=no ${EC2_NAME}@${NODE_IP} << 'EOF'
+                            # Get service endpoint
+                            NODE_PORT=\$(kubectl get svc mydeploy-service -o jsonpath='{.spec.ports[0].nodePort}')
+                            NODE_IP=\$(hostname -I | awk '{print \$1}')
+                            
+                            echo "========================================="
+                            echo "Application Access URL:"
+                            echo "http://\${NODE_IP}:\${NODE_PORT}"
+                            echo "========================================="
+                            
+                            # Test the endpoint (if curl is available)
+                            if command -v curl &> /dev/null; then
+                                echo "Testing endpoint..."
+                                curl -s http://\${NODE_IP}:\${NODE_PORT} || echo "Service may not be ready yet"
+                            fi
+EOF
+                    """
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo """
+                =========================================
+                DEPLOYMENT SUCCESSFUL!
+                =========================================
+                Application deployed to Kubernetes cluster at ${NODE_IP}
+                =========================================
+            """
+            // Optional: Send success email
+            emailext(
+                subject: "SUCCESS: CD Pipeline - ${env.JOB_NAME} [${env.BUILD_NUMBER}]",
+                body: "Application successfully deployed to Kubernetes cluster at ${NODE_IP}",
+                to: 'michaelayo360@gmail.com'
+            )
+        }
+        
+        failure {
+            echo """
+                =========================================
+                DEPLOYMENT FAILED!
+                =========================================
+                Check Jenkins console for details.
+                =========================================
+            """
+            emailext(
+                subject: "FAILED: CD Pipeline - ${env.JOB_NAME} [${env.BUILD_NUMBER}]",
+                body: "Deployment failed. Check Jenkins console output.",
+                to: 'michaelayo360@gmail.com'
+            )
+        }
+        
+        always {
+            cleanWs()
+        }
+    }
+}
