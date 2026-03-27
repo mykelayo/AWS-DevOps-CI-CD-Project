@@ -1,13 +1,14 @@
-# 1: DEFINE AWS VERSION
 terraform {
+  required_version = ">= 1.0"
+  
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "6"
+      version = "~> 5.0"
     }
   }
 }
-# 2: DEFINE THE REGION (N. Virginia)
+
 provider "aws" {
-  region = "us-east-1"
+  region = var.aws_region
 }
