@@ -1,11 +1,11 @@
-aws_region     = "us-east-1"
-environment    = "dev"
-project_name   = "aws-devops-platform"
+aws_region   = "us-east-1"
+environment  = "dev"
+project_name = "aws-devops-platform"
 
 # Instance configuration
-instance_type     = "t3.small"
-key_name          = "awsops"
-root_volume_size  = 16
+instance_type    = "t3.small"
+key_name         = "awsops"
+root_volume_size = 16
 
 # Kubernetes configuration
 kubernetes_version = "v1.29"

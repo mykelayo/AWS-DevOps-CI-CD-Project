@@ -43,7 +43,7 @@ output "k8s_kubeconfig_command" {
 # Combined Outputs
 output "summary" {
   description = "Deployment summary"
-  value = <<-EOT
+  value       = <<-EOT
     ========================================
     DEPLOYMENT SUMMARY
     ========================================

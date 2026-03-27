@@ -1,16 +1,10 @@
-# Get default VPC if vpc_id is not specified
-data "aws_vpc" "default" {
-  count = var.vpc_id == "" ? 1 : 0
-  default = true
-}
-
 # Master Server (Jenkins)
 resource "aws_instance" "master" {
   ami                    = var.ami_id
   instance_type          = var.instance_type
   key_name               = var.key_name
   vpc_security_group_ids = [aws_security_group.jenkins_sg.id]
-  
+
   root_block_device {
     volume_size = var.root_volume_size
     volume_type = var.root_volume_type
@@ -74,7 +68,7 @@ resource "aws_instance" "node" {
   instance_type          = var.instance_type
   key_name               = var.key_name
   vpc_security_group_ids = [aws_security_group.k8s_sg.id]
-  
+
   root_block_device {
     volume_size = var.root_volume_size
     volume_type = var.root_volume_type

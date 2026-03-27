@@ -1,3 +1,8 @@
+# Get default VPC if no VPC ID is specified
+data "aws_vpc" "default" {
+  default = true
+}
+
 # Security Group for Jenkins/Master Server
 resource "aws_security_group" "jenkins_sg" {
   name        = "jenkins-sg-${var.environment}"

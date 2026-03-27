@@ -15,7 +15,7 @@ variable "instance_type" {
 variable "ami_id" {
   description = "AMI ID for Amazon Linux 2"
   type        = string
-  default     = "ami-02dfbd4ff395f2a1b"  # Amazon Linux 2 in us-east-1
+  default     = "ami-02dfbd4ff395f2a1b" # Amazon Linux 2 in us-east-1
 }
 
 variable "key_name" {
@@ -40,7 +40,7 @@ variable "root_volume_type" {
 variable "vpc_id" {
   description = "VPC ID for resources"
   type        = string
-  default     = ""  # Use default VPC
+  default     = "" # Use default VPC
 }
 
 variable "allowed_ssh_cidrs" {
