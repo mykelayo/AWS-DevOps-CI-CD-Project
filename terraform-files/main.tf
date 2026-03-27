@@ -65,35 +65,52 @@ resource "aws_instance" "master" {
     Name = "MASTER-SERVER"
   }
 
-  user_data = <<-EOF
+user_data = <<-EOF
     #!/bin/bash
     set -e
 
+    # Update system
     yum update -y
 
     # Install core tools
-    yum install -y git docker java-17-amazon-corretto maven
+    yum install -y git docker java-17-amazon-corretto maven wget
 
     # Start Docker
     systemctl enable docker
     systemctl start docker
     usermod -aG docker ec2-user
-    usermod -aG docker jenkins || true
+    usermod -aG docker jenkins 2>/dev/null || true
 
-    # Install Jenkins
+    # Install Jenkins (latest LTS)
     wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
     rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
     yum install -y jenkins
     systemctl enable jenkins
     systemctl start jenkins
 
-    # Install Trivy (latest stable method)
-    rpm -ivh https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy\_0.69.3\_Linux-64bit.rpm
-    # Install Ansible properly (Amazon Linux compatible)
-    amazon-linux-extras install ansible2 -y || yum install -y ansible
+    # Install Trivy
+    yum install -y wget
+    wget https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_Linux-64bit.rpm
+    rpm -ivh trivy_0.69.3_Linux-64bit.rpm
+    rm -f trivy_0.69.3_Linux-64bit.rpm
 
-  EOF
-}
+    # Install Ansible
+    amazon-linux-extras install ansible2 -y
+
+    # Add Jenkins to Docker group (retry if group doesn't exist yet)
+    while ! getent group docker; do sleep 2; done
+    usermod -aG docker jenkins
+
+    # Restart Jenkins to apply group changes
+    systemctl restart jenkins
+
+    # Output Jenkins initial password
+    echo "========================================="
+    echo "Jenkins initial admin password:"
+    sleep 10
+    cat /var/lib/jenkins/secrets/initialAdminPassword 2>/dev/null || echo "Password file not ready yet"
+    echo "========================================="
+EOF
 
 # 3: OUTPUT PUBLIC IP OF EC2 INSTANCE
 output "ACCESS_YOUR_JENKINS_HERE" {
