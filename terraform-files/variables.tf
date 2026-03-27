@@ -27,7 +27,7 @@ variable "key_name" {
 variable "root_volume_size" {
   description = "Size of root volume in GB"
   type        = number
-  default     = 16
+  default     = 12
 }
 
 variable "root_volume_type" {
