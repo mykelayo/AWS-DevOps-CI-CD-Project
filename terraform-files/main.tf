@@ -1,71 +1,27 @@
-# SERVER1: 'MASTER-SERVER' (with Jenkins, Maven, Docker, Ansible, Trivy)
-# 1: CREATING A SECURITY GROUP FOR JENKINS SERVER
-resource "aws_security_group" "jenkins_sg" {
-  name = "jenkins-sg"
-  description = "Allow SSH, HTTP, HTTPS, 8080 for Jenkins & Maven"
-
-  # SSH Inbound Rules
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    from_port   = 8080
-    to_port     = 8080
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    from_port   = 8081
-    to_port     = 8081
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # SSH Outbound Rules
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+# Get default VPC if vpc_id is not specified
+data "aws_vpc" "default" {
+  count = var.vpc_id == "" ? 1 : 0
+  default = true
 }
 
-# 2: CREATE AN JENKINS EC2 INSTANCE USING EXISTING PEM KEY
+# Master Server (Jenkins)
 resource "aws_instance" "master" {
-  ami                    = "ami-02dfbd4ff395f2a1b"
-  instance_type          = "t3.small"
-  key_name               = "awsops"
+  ami                    = var.ami_id
+  instance_type          = var.instance_type
+  key_name               = var.key_name
   vpc_security_group_ids = [aws_security_group.jenkins_sg.id]
-
+  
   root_block_device {
-    volume_size = 16
-    volume_type = "gp2"
+    volume_size = var.root_volume_size
+    volume_type = var.root_volume_type
   }
 
-  tags = {
-    Name = "MASTER-SERVER"
-  }
+  tags = merge(var.tags, {
+    Name = "MASTER-SERVER-${var.environment}"
+    Role = "Jenkins-Master"
+  })
 
-user_data = <<-EOF
+  user_data = <<-EOF
     #!/bin/bash
     set -e
 
@@ -89,15 +45,14 @@ user_data = <<-EOF
     systemctl start jenkins
 
     # Install Trivy
-    yum install -y wget
-    wget https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_Linux-64bit.rpm
-    rpm -ivh trivy_0.69.3_Linux-64bit.rpm
-    rm -f trivy_0.69.3_Linux-64bit.rpm
+    wget https://github.com/aquasecurity/trivy/releases/download/${var.trivy_version}/trivy_${replace(var.trivy_version, "v", "")}_Linux-64bit.rpm
+    rpm -ivh trivy_${replace(var.trivy_version, "v", "")}_Linux-64bit.rpm
+    rm -f trivy_${replace(var.trivy_version, "v", "")}_Linux-64bit.rpm
 
     # Install Ansible
-    amazon-linux-extras install ansible2 -y
+    amazon-linux-extras install ansible2 -y || yum install -y ansible
 
-    # Add Jenkins to Docker group (retry if group doesn't exist yet)
+    # Add Jenkins to Docker group
     while ! getent group docker; do sleep 2; done
     usermod -aG docker jenkins
 
@@ -110,23 +65,87 @@ user_data = <<-EOF
     sleep 10
     cat /var/lib/jenkins/secrets/initialAdminPassword 2>/dev/null || echo "Password file not ready yet"
     echo "========================================="
-EOF
-
-# 3: OUTPUT PUBLIC IP OF EC2 INSTANCE
-output "ACCESS_YOUR_JENKINS_HERE" {
-  value = "http://${aws_instance.master.public_ip}:8080"
+  EOF
 }
 
-output "Jenkins_Initial_Password" {
-  value = "sudo cat /var/lib/jenkins/secrets/initialAdminPassword"
-}
+# Kubernetes Node Server (Control Plane)
+resource "aws_instance" "node" {
+  ami                    = var.ami_id
+  instance_type          = var.instance_type
+  key_name               = var.key_name
+  vpc_security_group_ids = [aws_security_group.k8s_sg.id]
+  
+  root_block_device {
+    volume_size = var.root_volume_size
+    volume_type = var.root_volume_type
+  }
 
-# 4: OUTPUT PUBLIC IP OF EC2 INSTANCE
-output "MASTER_SERVER_PUBLIC_IP" {
-  value = aws_instance.master.public_ip
-}
+  tags = merge(var.tags, {
+    Name = "K8S-CONTROL-PLANE-${var.environment}"
+    Role = "Kubernetes-Control-Plane"
+  })
 
-# 5: OUTPUT PRIVATE IP OF EC2 INSTANCE
-output "MASTER_SERVER_PRIVATE_IP" {
-  value = aws_instance.master.private_ip
+  user_data = <<-EOF
+    #!/bin/bash
+    set -e
+
+    yum update -y
+
+    # Disable swap
+    swapoff -a
+    sed -i '/swap/d' /etc/fstab
+
+    # Kernel modules
+    modprobe br_netfilter
+    cat <<EOT > /etc/sysctl.d/k8s.conf
+    net.bridge.bridge-nf-call-iptables = 1
+    net.ipv4.ip_forward = 1
+    net.bridge.bridge-nf-call-ip6tables = 1
+    EOT
+    sysctl --system
+
+    # Install containerd
+    yum install -y containerd
+    systemctl enable containerd
+    systemctl start containerd
+    
+    # Configure containerd
+    mkdir -p /etc/containerd
+    containerd config default > /etc/containerd/config.toml
+    sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+    systemctl restart containerd
+
+    # Kubernetes repo
+    cat <<EOT > /etc/yum.repos.d/kubernetes.repo
+    [kubernetes]
+    name=Kubernetes
+    baseurl=https://pkgs.k8s.io/core:/stable:/${var.kubernetes_version}/rpm/
+    enabled=1
+    gpgcheck=1
+    gpgkey=https://pkgs.k8s.io/core:/stable:/${var.kubernetes_version}/rpm/repodata/repomd.xml.key
+    EOT
+
+    # Install K8s
+    yum install -y kubelet kubeadm kubectl
+    systemctl enable kubelet
+
+    # Init cluster
+    kubeadm init --pod-network-cidr=${var.pod_network_cidr}
+
+    # Configure kubectl
+    mkdir -p /home/ec2-user/.kube
+    cp -i /etc/kubernetes/admin.conf /home/ec2-user/.kube/config
+    chown ec2-user:ec2-user /home/ec2-user/.kube/config
+
+    # Install Calico network
+    su - ec2-user -c "kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/${var.trivy_version}/manifests/calico.yaml"
+
+    # Wait for Calico to be ready
+    sleep 30
+    
+    # Allow scheduling on control plane
+    su - ec2-user -c "kubectl taint nodes --all node-role.kubernetes.io/control-plane-"
+  EOF
+
+  depends_on = [aws_instance.master]
 }
