@@ -5,7 +5,7 @@ project_name = "aws-devops-platform"
 # Instance configuration
 instance_type    = "t3.small"
 key_name         = "awsops"
-root_volume_size = 16
+root_volume_size = 12
 
 # Kubernetes configuration
 kubernetes_version = "v1.29"
@@ -18,6 +18,6 @@ trivy_version = "v0.69.3"
 tags = {
   ManagedBy   = "Terraform"
   Environment = "dev"
-  Project     = "devops-platform"
+  Project     = "aws-devops-platform"
   Team        = "DevOps"
 }
